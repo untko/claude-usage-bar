@@ -14,8 +14,6 @@ const costMark = atom({ plugin: 'usage-bar', key: 'costMark' } as const, null)
 // tool, a subagent's preload), and those gathering for the turn under way.
 const turnSkills = atom({ plugin: 'usage-bar', key: 'turnSkills' } as const, [])
 const pendingSkills = atom({ plugin: 'usage-bar', key: 'pendingSkills' } as const, [])
-// Where the session runs ('terminal', 'desktop'); the band's width is judged differently on each.
-const surface = atom({ plugin: 'usage-bar', key: 'surface' } as const, null)
 
 const SKILL_SCOPE = 'usage-bar-skills'
 const SPARK_KEEP = 40
@@ -23,11 +21,11 @@ const SPARK_SHOWN = 12
 // Bars kept when the band is too narrow for one row.
 const NARROW_SPARK = 6
 // The desktop draws proportional text, so a character takes under nine tenths of the cell the
-// app counts it as (measured on the band: 46 characters took 315px, 6.85px each, against cells of
-// about 7.8px). Counting characters as cells there reserves room that stays empty, and the band
-// wraps to two rows while there is space for one. 0.92 keeps a margin over the measured 0.88.
-// The terminal's cells are exact.
-const GLYPH_WIDTH: Record<string, number> = { desktop: 0.92 }
+// app counts it as. Measured on the band: 85 cells spanned 750px (8.8px each) while 46 characters
+// of the usage text took 334px (7.3px each), 0.83 of a cell. Counting characters as cells there
+// reserves room that stays empty, and the band drops its dots or wraps while there is space.
+// 0.85 keeps a small margin over the measured figure. The terminal's cells are exact.
+const GLYPH_WIDTH: Record<string, number> = { desktop: 0.85 }
 const BARS = '▁▂▃▄▅▆▇█'
 const BASE_DIR = /^Base directory for this skill:\s*(.+)$/m
 // Claude Code unpacks its own skills into a temp folder per version; name those instead.
@@ -252,7 +250,6 @@ const remembered = async ($: any, now: number): Promise<Limit[]> => {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await update($, surface, () => e.surface ?? null)
     const now = await $.session.usage({ breakdown: 'summary' })
     const limits = now.rateLimits.length > 0 ? now.rateLimits : await remembered($, await $.clock.now())
     await update($, usage, () => shape(now.context, limits))
@@ -447,7 +444,7 @@ export const register: Register = on => {
     const mine = turnParts(turn)
     const tag = skillLabel(skills)
     // The band's cells, in characters: more of them where a character is narrower than a cell.
-    const glyph = GLYPH_WIDTH[(await read($, surface)) ?? ''] ?? 1
+    const glyph = GLYPH_WIDTH[e.surface] ?? 1
     const columns = Math.floor(e.props.bodyColumns / glyph) - label.length - 2
     const mineWidth = width(mine) + (tag ? tag.length + 2 : 0)
     const need = (o: Layout) =>

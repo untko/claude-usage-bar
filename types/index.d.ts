@@ -34,7 +34,6 @@ declare module 'claude-code' {
       costMark: number | null
       turnSkills: SkillUse[]
       pendingSkills: SkillUse[]
-      surface: string | null
     }
   }
 }
