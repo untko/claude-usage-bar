@@ -33,7 +33,7 @@ const memoryStore = (on: any, seed: Record<string, unknown> = {}) => {
 }
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`${surface}: the band shows the short session id and a press copies all of it`, async ($, on) => {
+  test(`${surface}: the band shows only a copy mark and a press copies the session id`, async ($, on) => {
     const copies: string[] = []
     const toasts: string[] = []
     memoryStore(on)
@@ -64,8 +64,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     const chip = await ui.find({ key: 'session-id' })
 
-    expect(chip?.text).toContain('bf8e756a')
-    expect(chip?.text).not.toContain('9f0a')
+    expect(chip?.text).toBe('⧉')
 
     await ui.press({ key: 'session-id' })
 
@@ -73,7 +72,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(toasts).toEqual([`Copied session id ${SESSION}`])
   })
 
-  test(`${surface}: dots, the last turn and its skill`, async ($, on) => {
+  test(`${surface}: the last turn, its cost and its skill`, async ($, on) => {
     memoryStore(on)
     on('session.id', async () => ({ value: SESSION }))
     on('clock.now', async () => ({ value: Date.parse('2026-10-10T12:00:00Z') }))
@@ -102,7 +101,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     const text = flat(await ui.drawn())
 
-    expect(text).toContain('●●●○')
+    expect(text).not.toContain('●')
     expect(text).toContain('↻2h22m')
     expect(text).toContain('↳ 12k 48s')
     expect(text).toContain('/plugin-authoring')
@@ -149,6 +148,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const spark = await ui.find({ key: 'spark' })
 
     expect(spark?.text).toBe('▁█▁')
+    // The last turn leads with its tokens and time, then what it cost.
+    expect(flat(drawn)).toContain('↳ 200 2s $9.02')
 
     expect(drawnKey(drawn, 'spark')?.children[1].hover).toEqual({ scope: 'usage-bar-turn-2', color: 'cyan' })
     expect(drawnKey(drawn, 'turn-detail-2')?.hover).toEqual({ scope: 'usage-bar-turn-2', display: 'flex' })
@@ -166,7 +167,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(second).toContain('Σ 3 turns 31k new')
   })
 
-  test(`${surface}: a narrow band drops dots and the last-turn text before the sparkline`, async ($, on) => {
+  test(`${surface}: a narrow band drops the last-turn text before the sparkline`, async ($, on) => {
     memoryStore(on)
     on('session.id', async () => ({ value: SESSION }))
     on('clock.now', async () => ({ value: Date.parse('2026-10-10T12:00:00Z') }))
@@ -191,7 +192,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const wide = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     expect(flat(await wide.drawn())).toContain('↳')
 
-    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 52 : 56 } })
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 30 : 35 } })
     const text = flat(await narrow.drawn())
     expect(text).not.toContain('●')
     expect(text).not.toContain('↳')
@@ -223,12 +224,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
       } as any)
     }
 
-    // Too narrow for one row at any layout: two rows, and the bars still drawn.
-    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 50 } })
+    // Too narrow for one row at any layout, compact included: two rows, and the bars still drawn.
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 27 } })
     const drawn = await narrow.drawn()
-    // The context row has the band to itself, so it keeps its dots; the last row shares its
-    // line with the bars and the id, and drops them when that would overflow.
-    expect(flat(drawn)).toContain('ctx ●')
+    // The same compact style as the one row: tokens, no dots, whatever the row's room.
+    expect(flat(drawn)).toContain('ctx 100k')
+    expect(flat(drawn)).not.toContain('●')
     expect(flat(drawn)).toContain('5h 9%')
     expect((await narrow.find({ key: 'spark' }))?.text).toBe('▁█▁')
     expect(drawnKey(drawn, 'turn-detail-2')?.hover).toEqual({ scope: 'usage-bar-turn-2', display: 'flex' })
@@ -237,7 +238,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((drawn.children ?? []).some((c: any) => c.props?.justifyContent === 'space-between')).toBe(true)
 
     // Several widths, one answer: there is always a sparkline.
-    for (const bodyColumns of [30, 40, 50, 60, 70, 80, 90, 120]) {
+    for (const bodyColumns of [20, 30, 40, 50, 60, 70, 80, 90, 120]) {
       const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns } })
       expect((await ui.find({ key: 'spark' }))?.text, `at ${bodyColumns} columns`).toBe('▁█▁')
     }
@@ -268,11 +269,137 @@ for (const surface of ['terminal', 'desktop'] as const) {
       } as any)
     }
 
-    // 76 columns: the terminal's cells are exact and too few for one row; the desktop's text is narrower.
-    const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 76 } })
+    // 44 columns: the terminal's cells are exact and too few for even the compact row; the desktop's text is narrower.
+    const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 44 } })
     const oneRow = /\s·\s+5h/.test(flat(await ui.drawn()))
     expect(oneRow).toBe(surface === 'desktop')
-    expect((await ui.find({ key: 'spark' }))?.text).toBe('▂██▁')
+    // Short of room for five bars either way, so three bars: one row (desktop) or two (terminal).
+    expect((await ui.find({ key: 'spark' }))?.text).toBe('██▁')
+  })
+
+  test(`${surface}: at a typical width one compact row: ctx as tokens, " · " separators, "full in" dropped first`, async ($, on) => {
+    memoryStore(on)
+    on('session.id', async () => ({ value: SESSION }))
+    on('clock.now', async () => ({ value: Date.parse('2026-10-31T12:00:00Z') }))
+    on('ui.render', async () => null as any)
+    on('session.usage', async () => ({
+      value: {
+        startedAt: 0,
+        context: { percent: 33, tokens: 66000, window: 200000 },
+        rateLimits: [
+          { kind: 'five_hour', percentUsed: 19, resetsAt: '2026-10-31T12:54:00Z' },
+          // 85% with 2d0h left: well ahead of the clock (▲) and on pace to run out ("full in").
+          { kind: 'seven_day', percentUsed: 85, resetsAt: '2026-11-02T12:00:00Z' },
+        ],
+      } as any,
+    }))
+    on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+    on('turn.complete', async () => ({ text: '' }))
+    await $.session.start({ cwd: '/tmp', surface, isInteractive: true })
+    for (const output of [1000, 9000, 2000]) {
+      await $.turn.complete({
+        answer: '', durationMs: 1000, isAborted: false, turnId: `t${output}`, reason: 'answer',
+        usage: { input_tokens: 2, output_tokens: output, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, model: 'claude-opus-5-5' },
+      } as any)
+    }
+
+    const shownAt = async (bodyColumns: number) => {
+      const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns } })
+      const drawn = await ui.drawn()
+
+      return { text: flat(drawn), drawn }
+    }
+
+    // Wide enough for the compact row with "full in" and the last turn's figures.
+    const roomy = await shownAt(surface === 'desktop' ? 72 : 81)
+    expect(roomy.text).toContain('ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h full in')
+    expect(roomy.text).not.toContain('●')
+    expect(roomy.text).not.toContain('ctx 33%')
+
+    // A little tighter: "full in" goes first, the last turn's figures stay.
+    const typical = await shownAt(surface === 'desktop' ? 53 : 61)
+    expect(typical.text).toContain('ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h')
+    expect(typical.text).not.toContain('full in')
+    expect(typical.text).toContain('↳ 2k 1s')
+    expect((typical.drawn.children ?? []).some((c: any) => c.props?.justifyContent === 'space-between')).toBe(true)
+    expect(typical.text).toContain('▁█▂')
+
+    // Tighter still: the last turn's figures go next, the plan metrics and bars stay.
+    const tight = await shownAt(surface === 'desktop' ? 41 : 50)
+    expect(tight.text).toContain('ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h')
+    expect(tight.text).not.toContain('↳')
+    expect(tight.text).toContain('▁█▂')
+
+    // Never half there: at every width "full in" is whole on the one row, or gone.
+    for (let bodyColumns = 30; bodyColumns <= 100; bodyColumns++) {
+      const { text } = await shownAt(bodyColumns)
+      const full = text.includes('full in')
+      if (full) expect(text, `at ${bodyColumns} columns`).toMatch(/full in \d+[dhm]/)
+      // "full in" never outlasts the last turn's figures.
+      if (full) expect(text, `at ${bodyColumns} columns`).toContain('↳')
+      // Shown with the margin: the usage text and bars fit with at least FULL_IN_MARGIN to spare.
+      if (full) expect(bodyColumns, `at ${bodyColumns} columns`).toBeGreaterThanOrEqual(surface === 'desktop' ? 63 : 73)
+    }
+  })
+
+  test(`${surface}: ctx is tinted by how far it is toward compaction, and no compaction warning is drawn`, async ($, on) => {
+    let tokensNow = 100000
+    memoryStore(on)
+    on('session.id', async () => ({ value: SESSION }))
+    on('clock.now', async () => ({ value: Date.parse('2026-10-31T12:00:00Z') }))
+    on('ui.render', async () => null as any)
+    on('session.usage', async () => ({
+      value: {
+        startedAt: 0,
+        context: { percent: tokensNow / 2000, tokens: tokensNow, window: 200000, breakdown: { percentage: tokensNow / 2000, rawMaxTokens: 200000, totalTokens: tokensNow, isAutoCompactEnabled: true, autoCompactThreshold: 166000 } },
+        rateLimits: [],
+      } as any,
+    }))
+    on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+    // The drawn run whose only text is `text`.
+    const runOf = (node: any, text: string): any =>
+      typeof node !== 'object' || node === null
+        ? undefined
+        : (node.children ?? []).length === 1 && node.children[0] === text
+          ? node
+          : (node.children ?? []).map((c: any) => runOf(c, text)).find(Boolean)
+
+    for (const [used, label, color] of [[100000, '100k', undefined], [135000, '135k', 'yellow'], [160000, '160k', 'red']] as const) {
+      tokensNow = used
+      await $.session.start({ cwd: '/tmp', surface, isInteractive: true })
+      const drawn = await (await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })).drawn()
+
+      expect(flat(drawn), label).toContain(`${label}`)
+      expect(flat(drawn)).not.toContain('⚠')
+      expect(runOf(drawn, label)?.props?.color, label).toBe(color)
+    }
+  })
+
+  test(`${surface}: five bars when the band has the width, three when it does not, the whole history kept behind them`, async ($, on) => {
+    memoryStore(on)
+    on('session.id', async () => ({ value: SESSION }))
+    on('clock.now', async () => ({ value: Date.parse('2026-10-31T12:00:00Z') }))
+    on('ui.render', async () => null as any)
+    on('session.usage', async () => ({
+      value: { startedAt: 0, context: { percent: 20, tokens: 40000, window: 200000 }, rateLimits: [] } as any,
+    }))
+    on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+    on('turn.complete', async () => ({ text: '' }))
+    await $.session.start({ cwd: '/tmp', surface, isInteractive: true })
+    for (let i = 1; i <= 60; i++) {
+      await $.turn.complete({
+        answer: '', durationMs: 1000, isAborted: false, turnId: `t${i}`, reason: 'answer',
+        usage: { input_tokens: 1, output_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, model: 'claude-opus-5-5' },
+      } as any)
+    }
+
+    const wide = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
+    expect((await wide.find({ key: 'spark' }))?.text).toHaveLength(5)
+    // No bar is for an old turn only: the hover on the newest shows the whole session's total.
+    expect((await wide.find({ key: 'turn-detail-60' }))?.text).toContain('Σ 60 turns 60k new')
+
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 12 : 15 } })
+    expect((await narrow.find({ key: 'spark' }))?.text).toHaveLength(3)
   })
 
   test(`${surface}: a fresh process shows the remembered plan windows and this session's sparkline`, async ($, on) => {

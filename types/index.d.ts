@@ -1,6 +1,8 @@
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
 export type Usage = {
   contextPercent: number | null
+  // Tokens in the context now; the compact layouts show these in place of the percent.
+  contextTokens?: number | null
   contextWindow: number | null
   compactIn: number | null
   limits: Limit[]

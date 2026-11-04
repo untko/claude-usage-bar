@@ -1,8 +1,8 @@
 # usage-bar
 
 A Claude Code mod: an always-visible band above the prompt showing context fill, plan rate
-limits (5h, 7d), the last turn's tokens and duration, its skills, a per-turn sparkline
-(hover a bar for that turn's figures, end time and cost), and the short session id.
+limits (5h, 7d), the last turn's tokens, duration and cost, its skills, a per-turn sparkline
+(hover a bar for that turn's figures, end time and cost), and a copy mark that copies the session id.
 
 ## Layout
 

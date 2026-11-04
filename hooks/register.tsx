@@ -6,7 +6,7 @@ import type { LastTurn, Limit, SkillUse, TurnPoint, Usage } from '../types'
 const usage = atom({ plugin: 'usage-bar', key: 'usage' } as const, null)
 // The main loop's last finished turn: new tokens (input, output, cache writes) and length.
 const lastTurn = atom({ plugin: 'usage-bar', key: 'lastTurn' } as const, null)
-// Every finished main-loop turn so far (the newest SPARK_KEEP), for the sparkline,
+// Every finished main-loop turn so far (the whole session, none dropped), for the sparkline,
 // and the session's spend at the last of them, so each turn's own dollars are a difference.
 const turns = atom({ plugin: 'usage-bar', key: 'turns' } as const, [])
 const costMark = atom({ plugin: 'usage-bar', key: 'costMark' } as const, null)
@@ -16,16 +16,19 @@ const turnSkills = atom({ plugin: 'usage-bar', key: 'turnSkills' } as const, [])
 const pendingSkills = atom({ plugin: 'usage-bar', key: 'pendingSkills' } as const, [])
 
 const SKILL_SCOPE = 'usage-bar-skills'
-const SPARK_KEEP = 40
-const SPARK_SHOWN = 12
-// Bars kept when the band is too narrow for one row.
-const NARROW_SPARK = 6
+// Bars drawn: five when the band has the width, three when it does not. The whole session's
+// history is kept behind them (the hover total sums all of it).
+const SPARK_SHOWN = 5
+// Bars drawn when the band is short of width (including the two-row layout).
+const NARROW_SPARK = 3
 // The desktop draws proportional text, so a character takes under nine tenths of the cell the
 // app counts it as. Measured on the band: 85 cells spanned 750px (8.8px each) while 46 characters
 // of the usage text took 334px (7.3px each), 0.83 of a cell. Counting characters as cells there
-// reserves room that stays empty, and the band drops its dots or wraps while there is space.
+// reserves room that stays empty, and the band drops parts or wraps while there is space.
 // 0.85 keeps a small margin over the measured figure. The terminal's cells are exact.
 const GLYPH_WIDTH: Record<string, number> = { desktop: 0.85 }
+// Spare cells a one-row band keeps free while it shows "full in …", so the text never wraps.
+const FULL_IN_MARGIN = 6
 const BARS = '▁▂▃▄▅▆▇█'
 const BASE_DIR = /^Base directory for this skill:\s*(.+)$/m
 // Claude Code unpacks its own skills into a temp folder per version; name those instead.
@@ -39,17 +42,21 @@ const WINDOW_MIN: Record<string, number> = { five_hour: 300, seven_day: 10080 }
 
 type Part = readonly [text: string, style?: { color?: string; dimColor?: boolean }]
 // `spark` is how many turn bars to draw (0 none); `session` the last turn's figures and skills.
-type Layout = { dots: number; session: boolean; spark: number }
+// The row is always one tight line, `ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h`: the context as
+// tokens, single-space separators. `fullIn` keeps each plan's "full in …".
+type Layout = { session: boolean; spark: number; fullIn?: boolean }
 
 // Richest first; the first that fits the band's width wins. The sparkline outlasts the
-// dots and the last-turn text as the band narrows, down to six bars, and it is never
-// dropped for width: past the last of these the band takes two rows and keeps it there.
+// last-turn text as the band narrows, and it is never dropped for width: past the last of
+// these the band takes two rows and keeps it there. "full in" is the first thing to give way,
+// ahead of the last turn's figures; then those, then the sparkline halves, and only then the
+// two rows. So "full in" shows only while the last turn's figures do too.
 // (A band with no turns yet draws no bars, so these also serve for it.)
 const LAYOUTS: Layout[] = [
-  { dots: 4, session: true, spark: SPARK_SHOWN },
-  { dots: 0, session: true, spark: SPARK_SHOWN },
-  { dots: 0, session: false, spark: SPARK_SHOWN },
-  { dots: 0, session: false, spark: 6 },
+  { session: true, spark: SPARK_SHOWN, fullIn: true },
+  { session: true, spark: SPARK_SHOWN, fullIn: false },
+  { session: false, spark: SPARK_SHOWN, fullIn: false },
+  { session: false, spark: NARROW_SPARK, fullIn: false },
 ]
 
 const tokens = (n: number) =>
@@ -66,13 +73,6 @@ const seconds = (ms: number) => {
   const s = Math.round(ms / 1000)
 
   return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`
-}
-
-const dots = (percent: number, cells: number, color: string | undefined): Part[] => {
-  if (cells === 0) return []
-  const filled = Math.min(cells, Math.max(percent > 0 ? 1 : 0, Math.round((percent / 100) * cells)))
-
-  return [['●'.repeat(filled), { color }], ['○'.repeat(cells - filled), { dimColor: true }]]
 }
 
 // Quiet until it matters: neutral when comfortable, yellow when the window is
@@ -96,18 +96,21 @@ const plans = (limits: Limit[], now: number): Plan[] =>
     return { label: LABELS[l.kind] ?? l.kind, percent: l.percentUsed, left, elapsedMin, total }
   })
 
-const conversation = (u: Usage, o: Layout): Part[] => {
+const conversation = (u: Usage): Part[] => {
   if (u.contextPercent === null) return []
-  const color = tone(u.contextPercent, null, false)
+  // Tinted like the plan windows, but against the limit that matters here: how far the context
+  // has gone toward the point where it is compacted (the window's own percent when unknown).
+  const toCompact = u.compactIn !== null && u.contextTokens != null ? u.contextTokens + Math.max(0, u.compactIn) : null
+  const color = tone(
+    toCompact !== null && u.contextTokens != null && toCompact > 0 ? (100 * u.contextTokens) / toCompact : u.contextPercent,
+    null,
+    false,
+  )
+  const figure = u.contextTokens != null ? tokens(u.contextTokens) : `${Math.round(u.contextPercent)}%`
   const parts: Part[] = [
     ['ctx ', { dimColor: true }],
-    ...dots(u.contextPercent, o.dots, color),
-    [`${o.dots ? ' ' : ''}${Math.round(u.contextPercent)}%`, { color }],
+    [figure, { color }],
   ]
-  if (u.compactIn !== null && u.contextWindow !== null && u.compactIn < 0.2 * u.contextWindow) {
-    parts.push([` ⚠${tokens(Math.max(0, u.compactIn))}`, { color: 'red' }])
-  }
-
   return parts
 }
 
@@ -124,17 +127,19 @@ const plan = (p: Plan, o: Layout): Part[] => {
   const pace = elapsed !== null && p.percent - elapsed > 5 ? '▲' : ''
   const parts: Part[] = [
     [`${p.label} `, { dimColor: true }],
-    ...dots(p.percent, o.dots, color),
-    [`${o.dots ? ' ' : ''}${Math.round(p.percent)}%${pace}`, { color }],
+    [`${Math.round(p.percent)}%${pace}`, { color }],
   ]
   if (p.left !== null) parts.push([` ↻${span(p.left)}`, { dimColor: true }])
-  if (isTight && toFull !== null) parts.push([` full in ${span(toFull)}`, { color: 'red' }])
+  if (isTight && toFull !== null && o.fullIn !== false) parts.push([` full in ${span(toFull)}`, { color: 'red' }])
 
   return parts
 }
 
-const turnParts = (turn: LastTurn | null): Part[] =>
-  turn === null ? [] : [[`↳ ${tokens(turn.tokens)} ${seconds(turn.ms)}`, { dimColor: true }]]
+// The last turn: its new tokens, how long it ran and, when the ledger knows, what it cost.
+const turnParts = (turn: LastTurn | null, usd: number | null): Part[] =>
+  turn === null
+    ? []
+    : [[`↳ ${tokens(turn.tokens)} ${seconds(turn.ms)}${usd === null ? '' : ` ${dollars(usd)}`}`, { dimColor: true }]]
 
 // One bar per turn, as tall as its new tokens against the busiest shown turn.
 const barOf = (tokens: number, peak: number) =>
@@ -212,9 +217,10 @@ const row = (parts: Part[], Text: any, key: string) => (
   </Text>
 )
 
-// The session id, short enough to recognise; a press copies the whole of it.
-const ID_CHARS = 8
-const idLabel = (id: string) => `⧉ ${id.slice(0, ID_CHARS)}`
+// The session id is not spelled out: the band keeps only a copy mark, and a press copies the id.
+const ICON = '⧉'
+// Spare cells at the band's edge (its padding, text a little wider than counted), so nothing is clipped.
+const EDGE_MARGIN = 5
 
 // The window that matters is the one compaction measures against (`rawMaxTokens`,
 // often smaller than the model's), so the figures come from the breakdown when
@@ -229,6 +235,7 @@ const shape = (
 
   return {
     contextPercent: b?.percentage ?? context.percent ?? null,
+    contextTokens: used,
     contextWindow: window,
     compactIn: b?.isAutoCompactEnabled && b.autoCompactThreshold !== undefined && used !== null ? b.autoCompactThreshold - used : null,
     limits: rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })),
@@ -304,7 +311,7 @@ export const register: Register = on => {
         model: u.model,
         usd: total !== null && mark !== null ? Math.max(0, total - mark) : null,
       }
-      await update($, turns, list => [...list, point].slice(-SPARK_KEEP))
+      await update($, turns, list => [...list, point])
 
       const byId = ((await $.store.get(STORE_TURNS).catch(() => undefined)) ?? {}) as Record<string, TurnPoint[]>
       const id = await $.session.id()
@@ -347,22 +354,25 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const now = await $.clock.now()
     const turn = await read($, lastTurn)
-    const history = (await read($, turns)).slice(-SPARK_SHOWN)
+    const everyTurn = await read($, turns)
+    const history = everyTurn.slice(-SPARK_SHOWN)
     const skills = await read($, turnSkills)
     const sessionId = await $.session.id()
     const windows = plans(current.limits, now)
-    const usageParts = (o: Layout): Part[] =>
-      join([conversation(current, o), join(windows.map(w => plan(w, o)), '  ·  ')], '  ·  ')
+    const usageParts = (o: Layout): Part[] => {
+      const gap = ' · '
+
+      return join([conversation(current), join(windows.map(w => plan(w, o)), gap)], gap)
+    }
 
     if (usageParts(LAYOUTS[0]).length === 0) {
       return next(e)
     }
 
-    const label = idLabel(sessionId)
     const chip = (
       <Button
         key="session-id"
-        label={label}
+        label={ICON}
         plain
         dimColor
         onPress={async press => {
@@ -424,7 +434,7 @@ export const register: Register = on => {
         hover={{ scope: `usage-bar-turn-${t.n}`, display: 'flex' }}
       >
         {row(turnRow(t, now), Text, `turn-${t.n}`)}
-        {row(totalRow(history), Text, `total-${t.n}`)}
+        {row(totalRow(everyTurn), Text, `total-${t.n}`)}
       </Box>
     ))
 
@@ -441,14 +451,22 @@ export const register: Register = on => {
       </Box>
     )
 
-    const mine = turnParts(turn)
+    const mine = turnParts(turn, everyTurn[everyTurn.length - 1]?.usd ?? null)
     const tag = skillLabel(skills)
     // The band's cells, in characters: more of them where a character is narrower than a cell.
     const glyph = GLYPH_WIDTH[e.surface] ?? 1
-    const columns = Math.floor(e.props.bodyColumns / glyph) - label.length - 2
+    const cells = Math.floor(e.props.bodyColumns / glyph)
+    const columns = cells - ICON.length - EDGE_MARGIN
     const mineWidth = width(mine) + (tag ? tag.length + 2 : 0)
-    const need = (o: Layout) =>
-      width(usageParts(o)) + (o.session && mineWidth ? mineWidth + 2 : 0) + sparkWidth(o)
+    // The width estimate runs a few cells optimistic (the band's padding, proportional text), and a
+    // row that overflows by a little wraps its last words onto a second line. "full in" is the part
+    // that sits at the end, so a row showing it asks for a margin: it fits whole or it is dropped.
+    const need = (o: Layout) => {
+      const parts = usageParts(o)
+      const margin = parts.some(([text]) => text.includes('full in')) ? FULL_IN_MARGIN : 0
+
+      return width(parts) + margin + (o.session && mineWidth ? mineWidth + 2 : 0) + sparkWidth(o)
+    }
     const fit = LAYOUTS.find(o => need(o) <= columns)
 
     if (fit !== undefined) {
@@ -461,21 +479,21 @@ export const register: Register = on => {
       )
     }
 
-    // Too narrow for one row: context above, plan windows below. The sparkline stays, at the
-    // right of the last row beside the id, so it is never lost to width. Each row has the band to
-    // itself, so the dots stay wherever the row still fits with them (the last row shares its line
-    // with the sparkline and id, and drops them only when that line would overflow).
-    const last = LAYOUTS[LAYOUTS.length - 1]
+    // Too narrow for one row: context above, plan windows below, in the same compact style. The
+    // sparkline stays, at the right of the last row beside the copy mark, so it is never lost to
+    // width. That last row drops "full in" if it must, so nothing is ever clipped or wrapped.
+    const last: Layout = { session: false, spark: NARROW_SPARK, fullIn: true }
     const small = history.slice(-NARROW_SPARK)
-    const withDots: Layout = { ...last, dots: LAYOUTS[0].dots }
-    const rowParts = [
-      (o: Layout) => conversation(current, o),
-      (o: Layout) => join(windows.map(w => plan(w, o)), '  ·  '),
-    ]
-    const rowsAt = (o: Layout) => rowParts.map(f => f(o)).filter(r => r.length > 0)
-    const fixed = (small.length > 0 ? small.length + 1 : 0) + 14 // sparkline and the id chip beside the last row
-    const rows = rowsAt(withDots)
-    if (width(rows[rows.length - 1]) + fixed > columns) rows[rows.length - 1] = rowsAt(last)[rows.length - 1]
+    const rowsAt = (o: Layout) =>
+      [conversation(current), join(windows.map(w => plan(w, o)), ' · ')].filter(r => r.length > 0)
+    const rows = rowsAt(last)
+    const beside = (small.length > 0 ? small.length + 1 : 0) + 4 // sparkline, and the gaps before the chip
+    const roomFor = (r: Part[]) =>
+      width(r) + (r.some(([text]) => text.includes('full in')) ? FULL_IN_MARGIN : 0) + beside + ICON.length <= cells - EDGE_MARGIN
+
+    if (!roomFor(rows[rows.length - 1])) {
+      rows[rows.length - 1] = rowsAt({ ...last, fullIn: false })[rows.length - 1]
+    }
 
     return (
       <Box flexDirection="column">
