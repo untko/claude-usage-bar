@@ -226,7 +226,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // Too narrow for one row at any layout: two rows, and the bars still drawn.
     const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 50 } })
     const drawn = await narrow.drawn()
-    expect(flat(drawn)).not.toContain('●')
+    // The context row has the band to itself, so it keeps its dots; the last row shares its
+    // line with the bars and the id, and drops them when that would overflow.
+    expect(flat(drawn)).toContain('ctx ●')
+    expect(flat(drawn)).toContain('5h 9%')
     expect((await narrow.find({ key: 'spark' }))?.text).toBe('▁█▁')
     expect(drawnKey(drawn, 'turn-detail-2')?.hover).toEqual({ scope: 'usage-bar-turn-2', display: 'flex' })
     // The row holding the bars and the id is a direct child of the band, not inside a

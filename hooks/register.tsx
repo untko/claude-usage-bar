@@ -464,11 +464,21 @@ export const register: Register = on => {
       )
     }
 
-    // Too narrow for one row even without dots: context above, plan windows below. The
-    // sparkline stays, at the right of the last row beside the id, so it is never lost to width.
+    // Too narrow for one row: context above, plan windows below. The sparkline stays, at the
+    // right of the last row beside the id, so it is never lost to width. Each row has the band to
+    // itself, so the dots stay wherever the row still fits with them (the last row shares its line
+    // with the sparkline and id, and drops them only when that line would overflow).
     const last = LAYOUTS[LAYOUTS.length - 1]
-    const rows = [conversation(current, last), join(windows.map(w => plan(w, last)), '  ·  ')].filter(r => r.length > 0)
     const small = history.slice(-NARROW_SPARK)
+    const withDots: Layout = { ...last, dots: LAYOUTS[0].dots }
+    const rowParts = [
+      (o: Layout) => conversation(current, o),
+      (o: Layout) => join(windows.map(w => plan(w, o)), '  ·  '),
+    ]
+    const rowsAt = (o: Layout) => rowParts.map(f => f(o)).filter(r => r.length > 0)
+    const fixed = (small.length > 0 ? small.length + 1 : 0) + 14 // sparkline and the id chip beside the last row
+    const rows = rowsAt(withDots)
+    if (width(rows[rows.length - 1]) + fixed > columns) rows[rows.length - 1] = rowsAt(last)[rows.length - 1]
 
     return (
       <Box flexDirection="column">
