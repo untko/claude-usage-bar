@@ -191,7 +191,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const wide = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     expect(flat(await wide.drawn())).toContain('↳')
 
-    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 52 } })
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 52 : 56 } })
     const text = flat(await narrow.drawn())
     expect(text).not.toContain('●')
     expect(text).not.toContain('↳')
