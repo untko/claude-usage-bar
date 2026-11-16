@@ -67,7 +67,11 @@ Layout:
 
 Workflow:
 
-- Try a checkout without touching your own install: `claude plugin marketplace add /path/to/checkout`.
+- Run your edits in the app: install from the checkout (`claude plugin marketplace add /path/to/checkout`,
+  then `claude plugin install usage-bar@usage-bar`). After each edit, re-copy it with
+  `claude plugin test . && claude plugin uninstall usage-bar@usage-bar && claude plugin install usage-bar@usage-bar`,
+  no version bump needed (`plugin update` ignores edits until `version` changes), then fully quit and reopen the app.
+  Use an isolated `CLAUDE_CONFIG_DIR` to try a checkout without touching your own install.
 - Tests: `claude plugin test .` from the repo root.
 - Releasing: bump `version` in `plugin.json`, then run `claude plugin validate .`, `claude plugin test .`,
   `claude plugin marketplace update usage-bar` and `claude plugin update usage-bar@usage-bar`, and fully quit the app.
