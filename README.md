@@ -1,6 +1,8 @@
 # usage-bar
 
-[![usage-bar in 50 seconds: click to watch](assets/videos/pitch-poster.png)](assets/videos/usage-bar-pitch-landscape.mp4)
+![usage-bar in 50 seconds](assets/videos/usage-bar-pitch.gif)
+
+[Watch with narration](assets/videos/usage-bar-pitch-landscape.mp4) · [vertical cut](assets/videos/usage-bar-pitch-vertical.mp4)
 
 A Claude Code mod: an always-visible band above the prompt showing context fill, plan rate
 limits (5h, 7d), the last turn's tokens, duration and cost, its skills, a per-turn sparkline (height is cost, colour the costliest new work: in green, cache writes yellow, out blue, grey if none;
