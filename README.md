@@ -7,8 +7,8 @@
 A Claude Code mod: one always-visible line above your prompt that answers three questions:
 how full is my context, how much of my plan is left, and what did the last turn cost.
 
-It works in the Claude desktop app and in the terminal. It is not in the Claude plugin
-marketplace; you install it from a local marketplace folder (see [Install](#install)).
+It works in the Claude desktop app and in the terminal. It is not in Anthropic's plugin
+directory; this repo is its own marketplace (see [Install](#install)).
 
 ## What it shows
 
@@ -35,23 +35,11 @@ the band takes a second row. Context and the plans stay on one row as long as th
 
 ## Install
 
-The plugin is not published in a marketplace, so make a small local one around a clone of this repo
-(requires the `claude` CLI):
+This repo is its own plugin marketplace, so you add it straight from GitHub (requires the `claude` CLI):
 
 ```bash
-mkdir -p ~/claude-mods/.claude-plugin && cd ~/claude-mods
-git clone https://github.com/untko/claude-usage-bar usage-bar
-cat > .claude-plugin/marketplace.json <<'EOF'
-{
-  "name": "local-mods",
-  "owner": { "name": "you" },
-  "plugins": [
-    { "name": "usage-bar", "source": "./usage-bar", "description": "Context, plan limits and per-turn cost above the prompt" }
-  ]
-}
-EOF
-claude plugin marketplace add ~/claude-mods
-claude plugin install usage-bar@local-mods
+claude plugin marketplace add untko/claude-usage-bar
+claude plugin install usage-bar@usage-bar
 ```
 
 Then fully quit and reopen the app. `/reload-plugins` is not enough to load a mod.
@@ -59,9 +47,8 @@ Then fully quit and reopen the app. `/reload-plugins` is not enough to load a mo
 ### Update
 
 ```bash
-git -C ~/claude-mods/usage-bar pull
-claude plugin marketplace update local-mods
-claude plugin update usage-bar@local-mods
+claude plugin marketplace update usage-bar
+claude plugin update usage-bar@usage-bar
 ```
 
 Then fully quit and reopen the app. Updates apply when `version` in `.claude-plugin/plugin.json`
@@ -74,16 +61,16 @@ Layout:
 - `hooks/register.tsx`: the mod (band, layouts, turn accounting)
 - `hooks/register.test.ts`: tests
 - `types/index.d.ts`: plugin state types
-- `.claude-plugin/plugin.json`: manifest
+- `.claude-plugin/plugin.json`: plugin manifest
+- `.claude-plugin/marketplace.json`: makes this repo its own marketplace (`source: "./"`; no `version` here, so `plugin.json` is the only place to bump)
 - `assets/videos/`: the pitch video, in landscape and vertical cuts, and the GIF above
 
 Workflow:
 
-- Run the tests from the marketplace folder that contains the plugin, not from inside the plugin folder:
-  `claude plugin test usage-bar`.
-- Releasing: bump `version` in `plugin.json` (and in the marketplace entry if it has one), then run
-  `claude plugin validate usage-bar`, `claude plugin test usage-bar`,
-  `claude plugin marketplace update <marketplace>` and `claude plugin update usage-bar@<marketplace>`, and fully quit the app.
+- Try a checkout without touching your own install: `claude plugin marketplace add /path/to/checkout`.
+- Tests: `claude plugin test .` from the repo root.
+- Releasing: bump `version` in `plugin.json`, then run `claude plugin validate .`, `claude plugin test .`,
+  `claude plugin marketplace update usage-bar` and `claude plugin update usage-bar@usage-bar`, and fully quit the app.
 - Keep the version below 1.0.0 (0.9.9, then 0.9.10, and so on).
 - On macOS, `sed -i` needs an empty suffix argument: `sed -i ''`.
 

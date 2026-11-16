@@ -1,0 +1,8 @@
+{
+  "name": "usage-bar",
+  "description": "Claude Code mods by untko",
+  "owner": { "name": "untko" },
+  "plugins": [
+    { "name": "usage-bar", "source": "./", "description": "Context, plan limits and per-turn cost above the prompt" }
+  ]
+}
