@@ -1,7 +1,7 @@
 # usage-bar
 
 A Claude Code mod: an always-visible band above the prompt showing context fill, plan rate
-limits (5h, 7d), the last turn's tokens, duration and cost, its skills, a per-turn sparkline (height is cost, colour the costliest new work: in blue, out magenta, cache writes yellow, grey if none;
+limits (5h, 7d), the last turn's tokens, duration and cost, its skills, a per-turn sparkline (height is cost, colour the costliest new work: in green, cache writes yellow, out blue, grey if none;
 hover a bar for that turn's figures, end time and cost), and a copy mark that copies the session id.
 
 ## Layout
@@ -35,6 +35,8 @@ Updates: bump the version in `plugin.json` and the marketplace entry, run `claud
 
 The desktop wraps text that overflows the band instead of cutting it, so every optional part must fit whole or be dropped.
 
-- `LAYOUTS` lists the layouts from richest to leanest; the first one that fits wins. A part is dropped in this order: `full in`, the last turn's figures, the sparkline from 5 bars to 3, then the band takes two rows.
-- Width is an estimate that runs a few cells optimistic (`GLYPH_WIDTH` for the desktop's narrower glyphs), so `EDGE_MARGIN` and `FULL_IN_MARGIN` keep spare cells. A part at the end of the row needs the largest margin.
+- `LAYOUTS` lists the layouts from richest to leanest; the first one that fits wins. A part is dropped in this order: `full in`, the last turn's figures, the sparkline from 5 bars to 3, the copy mark, the plans' reset timers (`↻3h41m`), the sparkline, and only then the band takes two rows (so the context and plans keep one row as long as they fit).
+- Width is an estimate that runs a few cells optimistic (`GLYPH_WIDTH` for the desktop's narrower text, `WIDE_GLYPH_CELLS` for the copy mark's two cells, `BAR_CHARS` for a sparkline bar, about 1.6 characters), so `EDGE_MARGIN` and `FULL_IN_MARGIN` keep spare cells. A part at the end of the row needs the largest margin.
 - Changing the width of any part shifts the width thresholds in several tests; retune them by probing, not by guessing.
+- Measure each kind of glyph on its own. One shared "wide glyph" figure (2 cells, taken from the lone copy mark) overcounted a row of bars (1.6 characters each, measured 3 bars at 43px against 8.8px per character) and hid the sparkline with room to spare. Estimate from a screenshot of the real band, not from a theory of cell widths.
+- When a `LAYOUTS` entry is added or removed, every width threshold in the tests moves. Probe the breakpoints by looping `bodyColumns` and printing which parts survive (bars, copy mark, `↻`, one row or two) on both surfaces, then set the assertions from that output.

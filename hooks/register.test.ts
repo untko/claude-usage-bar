@@ -149,9 +149,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     // Height is each turn's cost ($0.10, $0.50, and the subagent's $9 landing on the third).
     expect(spark?.text).toBe('▁▁█')
-    // Colour is the new work that cost the turn most: output (magenta) for the 1k and 30k turns,
+    // Colour is the new work that cost the turn most: output (blue) for the 1k and 30k turns,
     // cache writes (yellow) for the last. Cache reads never decide: they top every long turn.
-    expect(drawnKey(drawn, 'spark')?.children.map((c: any) => c.props?.color)).toEqual(['magenta', 'magenta', 'yellow'])
+    expect(drawnKey(drawn, 'spark')?.children.map((c: any) => c.props?.color)).toEqual(['blue', 'blue', 'yellow'])
     // The last turn leads with its tokens and time, then what it cost.
     expect(flat(drawn)).toContain('↳ 5k 2s $9.02')
 
@@ -162,7 +162,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const second = (await ui.find({ key: 'turn-detail-2' }))?.text
     // The turn's end time leads the row: the clock alone, as the mocked "now" is the same day.
     expect(second).toMatch(/#2 \d\d:\d\d {2}30k new/)
-    expect(second).toContain('in 100 · out 30k · cache+ 0')
+    expect(second).toContain('in 100 · cache+ 0 · out 30k')
     expect(second).toContain('cache read 50k')
     // The subagent's $9 lands in the next main turn's dollars, the turn that caused it.
     expect((await ui.find({ key: 'turn-detail-3' }))?.text).toContain('$9.02')
@@ -203,7 +203,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const wide = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     expect(flat(await wide.drawn())).toContain('↳')
 
-    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 30 : 35 } })
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 36 : 38 } })
     const text = flat(await narrow.drawn())
     expect(text).not.toContain('●')
     expect(text).not.toContain('↳')
@@ -236,7 +236,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     }
 
     // Too narrow for one row at any layout, compact included: two rows, and the bars still drawn.
-    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 27 } })
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 20 } })
     const drawn = await narrow.drawn()
     // The same compact style as the one row: tokens, no dots, whatever the row's room.
     expect(flat(drawn)).toContain('ctx 100k')
@@ -248,8 +248,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // shrink-to-fit wrapper, so space-between can push them to the right edge.
     expect((drawn.children ?? []).some((c: any) => c.props?.justifyContent === 'space-between')).toBe(true)
 
-    // Several widths, one answer: there is always a sparkline.
-    for (const bodyColumns of [20, 30, 40, 50, 60, 70, 80, 90, 120]) {
+    // Wide enough for one row, bars and copy mark: always a sparkline.
+    for (const bodyColumns of [20, 60, 70, 80, 90, 120]) {
       const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns } })
       expect((await ui.find({ key: 'spark' }))?.text, `at ${bodyColumns} columns`).toBe('▁█▁')
     }
@@ -280,12 +280,23 @@ for (const surface of ['terminal', 'desktop'] as const) {
       } as any)
     }
 
-    // 44 columns: the terminal's cells are exact and too few for even the compact row; the desktop's text is narrower.
-    const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 44 } })
-    const oneRow = /\s·\s+5h/.test(flat(await ui.drawn()))
-    expect(oneRow).toBe(surface === 'desktop')
-    // Short of room for five bars either way, so three bars: one row (desktop) or two (terminal).
-    expect((await ui.find({ key: 'spark' }))?.text).toBe('██▁')
+    const at = async (bodyColumns: number) => {
+      const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns } })
+
+      return { oneRow: /\s·\s+5h/.test(flat(await ui.drawn())), spark: (await ui.find({ key: 'spark' }))?.text, chip: (await ui.find({ key: 'session-id' })) !== undefined, resets: flat(await ui.drawn()).includes('↻') }
+    }
+
+    // The band sheds, in order, as it narrows: the copy mark, the plans' reset timers (`↻3h41m`), the bars; only then two rows.
+    // 49 columns on the terminal, 46 on the desktop (its text is narrower): everything fits on one row.
+    expect(await at(surface === 'desktop' ? 46 : 49)).toEqual({ oneRow: true, spark: '██▁', chip: true, resets: true })
+    // One column short: the copy mark goes first.
+    expect(await at(surface === 'desktop' ? 44 : 48)).toEqual({ oneRow: true, spark: '██▁', chip: false, resets: true })
+    // Narrower: the timers go, the percentages and the three bars stay, still one row.
+    expect(await at(40)).toEqual({ oneRow: true, spark: '██▁', chip: false, resets: false })
+    // Narrower still: the bars go too, the row stays one row.
+    expect(await at(30)).toEqual({ oneRow: true, spark: undefined, chip: false, resets: false })
+    // Too narrow even for that: two rows, with everything kept.
+    expect(await at(20)).toEqual({ oneRow: false, spark: '██▁', chip: true, resets: true })
   })
 
   test(`${surface}: at a typical width one compact row: ctx as tokens, " · " separators, "full in" dropped first`, async ($, on) => {
@@ -322,13 +333,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
     }
 
     // Wide enough for the compact row with "full in" and the last turn's figures.
-    const roomy = await shownAt(surface === 'desktop' ? 72 : 81)
+    const roomy = await shownAt(surface === 'desktop' ? 77 : 81)
     expect(roomy.text).toContain('ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h full in')
     expect(roomy.text).not.toContain('●')
     expect(roomy.text).not.toContain('ctx 33%')
 
     // A little tighter: "full in" goes first, the last turn's figures stay.
-    const typical = await shownAt(surface === 'desktop' ? 53 : 61)
+    const typical = await shownAt(surface === 'desktop' ? 58 : 61)
     expect(typical.text).toContain('ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h')
     expect(typical.text).not.toContain('full in')
     expect(typical.text).toContain('↳ 2k 1s')
@@ -336,10 +347,18 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(typical.text).toContain('▁█▂')
 
     // Tighter still: the last turn's figures go next, the plan metrics and bars stay.
-    const tight = await shownAt(surface === 'desktop' ? 41 : 50)
+    const tight = await shownAt(surface === 'desktop' ? 46 : 50)
     expect(tight.text).toContain('ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h')
     expect(tight.text).not.toContain('↳')
     expect(tight.text).toContain('▁█▂')
+
+    // Between the full figures and none, the last turn shrinks to one figure instead of vanishing.
+    const briefAt: number[] = []
+    for (let bodyColumns = 30; bodyColumns <= 100; bodyColumns++) {
+      const { text } = await shownAt(bodyColumns)
+      if (text.endsWith('▁█▂↳ 2k')) briefAt.push(bodyColumns)
+    }
+    expect(briefAt.length, 'a width where only the one figure fits').toBeGreaterThan(0)
 
     // Never half there: at every width "full in" is whole on the one row, or gone.
     for (let bodyColumns = 30; bodyColumns <= 100; bodyColumns++) {
@@ -409,7 +428,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // No bar is for an old turn only: the hover on the newest shows the whole session's total.
     expect((await wide.find({ key: 'turn-detail-60' }))?.text).toContain('Σ 60 turns 60k new')
 
-    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 12 : 15 } })
+    const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 17 : 15 } })
     expect((await narrow.find({ key: 'spark' }))?.text).toHaveLength(3)
   })
 

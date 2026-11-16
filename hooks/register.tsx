@@ -27,6 +27,14 @@ const NARROW_SPARK = 3
 // reserves room that stays empty, and the band drops parts or wraps while there is space.
 // 0.85 keeps a small margin over the measured figure. The terminal's cells are exact.
 const GLYPH_WIDTH: Record<string, number> = { desktop: 0.85 }
+// The block glyphs of the sparkline (and the copy mark) are not proportional text: on the desktop each
+// takes two of the app's cells. Measured on the band: 5 bars spanned 88px against 7.5px per text
+// character, so counting a bar as one character left the copy mark clipped at the band's edge.
+const WIDE_GLYPH_CELLS: Record<string, number> = { desktop: 2 }
+// A sparkline bar on its own, in the text characters the estimate counts. Measured again on a band with
+// the bars side by side: 3 bars took 43px against 8.8px per text character, 1.6 characters a bar, so the
+// two cells of a lone wide glyph (the copy mark) overcounted the bars and hid them with room to spare.
+const BAR_CHARS: Record<string, number> = { desktop: 1.8 }
 // Spare cells a one-row band keeps free while it shows "full in …", so the text never wraps.
 const FULL_IN_MARGIN = 6
 const BARS = '▁▂▃▄▅▆▇█'
@@ -44,19 +52,26 @@ type Part = readonly [text: string, style?: { color?: string; dimColor?: boolean
 // `spark` is how many turn bars to draw (0 none); `session` the last turn's figures and skills.
 // The row is always one tight line, `ctx 66k · 5h 19% ↻54m · 7d 85%▲ ↻2d0h`: the context as
 // tokens, single-space separators. `fullIn` keeps each plan's "full in …".
-type Layout = { session: boolean; spark: number; fullIn?: boolean }
+// `brief` trims the last turn to its cost (or its tokens when the ledger has no cost).
+// `chip: false` drops the copy mark; `resets: false` the plans' reset timers (`↻3h41m`).
+type Layout = { session: boolean; spark: number; fullIn?: boolean; brief?: boolean; chip?: boolean; resets?: boolean }
 
 // Richest first; the first that fits the band's width wins. The sparkline outlasts the
-// last-turn text as the band narrows, and it is never dropped for width: past the last of
-// these the band takes two rows and keeps it there. "full in" is the first thing to give way,
-// ahead of the last turn's figures; then those, then the sparkline halves, and only then the
-// two rows. So "full in" shows only while the last turn's figures do too.
+// last-turn text as the band narrows. "full in" is the first thing to give way, ahead of the
+// last turn's figures; then those shrink to the cost alone, then go, then the sparkline halves,
+// then the copy mark goes, then the plans' reset timers, then the sparkline, so the context and the
+// plans' percentages keep one row. Only a band too narrow even for those takes two rows. So
+// "full in" shows only while the last turn's figures do too.
 // (A band with no turns yet draws no bars, so these also serve for it.)
 const LAYOUTS: Layout[] = [
   { session: true, spark: SPARK_SHOWN, fullIn: true },
   { session: true, spark: SPARK_SHOWN, fullIn: false },
+  { session: true, spark: SPARK_SHOWN, fullIn: false, brief: true },
   { session: false, spark: SPARK_SHOWN, fullIn: false },
   { session: false, spark: NARROW_SPARK, fullIn: false },
+  { session: false, spark: NARROW_SPARK, fullIn: false, chip: false },
+  { session: false, spark: NARROW_SPARK, fullIn: false, chip: false, resets: false },
+  { session: false, spark: 0, fullIn: false, chip: false, resets: false },
 ]
 
 const tokens = (n: number) =>
@@ -129,17 +144,19 @@ const plan = (p: Plan, o: Layout): Part[] => {
     [`${p.label} `, { dimColor: true }],
     [`${Math.round(p.percent)}%${pace}`, { color }],
   ]
-  if (p.left !== null) parts.push([` ↻${span(p.left)}`, { dimColor: true }])
+  if (p.left !== null && o.resets !== false) parts.push([` ↻${span(p.left)}`, { dimColor: true }])
   if (isTight && toFull !== null && o.fullIn !== false) parts.push([` full in ${span(toFull)}`, { color: 'red' }])
 
   return parts
 }
 
 // The last turn: its new tokens, how long it ran and, when the ledger knows, what it cost.
-const turnParts = (turn: LastTurn | null, usd: number | null): Part[] =>
+const turnParts = (turn: LastTurn | null, usd: number | null, brief = false): Part[] =>
   turn === null
     ? []
-    : [[`↳ ${tokens(turn.tokens)} ${seconds(turn.ms)}${usd === null ? '' : ` ${dollars(usd)}`}`, { dimColor: true }]]
+    : brief
+      ? [[`↳ ${usd === null ? tokens(turn.tokens) : dollars(usd)}`, { dimColor: true }]]
+      : [[`↳ ${tokens(turn.tokens)} ${seconds(turn.ms)}${usd === null ? '' : ` ${dollars(usd)}`}`, { dimColor: true }]]
 
 // One bar per turn, as tall as what the turn cost against the dearest turn shown.
 const barOf = (value: number, peak: number) =>
@@ -149,17 +166,17 @@ const barOf = (value: number, peak: number) =>
 // models): an output token five times, a cache write 1.25, a cache read a tenth. The weights
 // rank a turn's kinds by what they cost, and stand in for dollars when the ledger is silent.
 const KINDS = [
-  { name: 'in', weight: 1, color: 'blue', of: (t: TurnPoint) => t.input },
-  { name: 'out', weight: 5, color: 'magenta', of: (t: TurnPoint) => t.output },
+  { name: 'in', weight: 1, color: 'green', of: (t: TurnPoint) => t.input },
   { name: 'cache+', weight: 1.25, color: 'yellow', of: (t: TurnPoint) => t.cacheWrite },
+  { name: 'out', weight: 5, color: 'blue', of: (t: TurnPoint) => t.output },
   { name: 'cache read', weight: 0.1, color: 'gray', of: (t: TurnPoint) => t.cacheRead },
 ] as const
 
 const weighted = (t: TurnPoint) => KINDS.reduce((n, k) => n + k.weight * k.of(t), 0)
 
-// A cell holds one colour, so a bar shows the new work that cost the turn most: input, output
-// or cache writes. Cache reads are left out of the choice: on a long session they are the
-// biggest line of nearly every turn, and every bar would turn the same grey. A turn with no
+// A cell holds one colour, so a bar shows the new work that cost the turn most: input, cache
+// writes or output. Output is the quiet blue: it wins most turns, so it should not shout. Cache
+// reads are left out of the choice: on a long session they are the biggest line of nearly every turn, and every bar would turn the same grey. A turn with no
 // new work at all shows grey. The hover row carries the whole split.
 const dominant = (t: TurnPoint) => {
   const fresh = KINDS.slice(0, 3).reduce((best, k) => (k.weight * k.of(t) > best.weight * best.of(t) ? k : best), KINDS[0])
@@ -268,7 +285,7 @@ const row = (parts: Part[], Text: any, key: string) => (
 // The session id is not spelled out: the band keeps only a copy mark, and a press copies the id.
 const ICON = '⧉'
 // Spare cells at the band's edge (its padding, text a little wider than counted), so nothing is clipped.
-const EDGE_MARGIN = 5
+const EDGE_MARGIN = 3
 
 // The window that matters is the one compaction measures against (`rawMaxTokens`,
 // often smaller than the model's), so the figures come from the breakdown when
@@ -450,10 +467,13 @@ export const register: Register = on => {
       ) : null
 
     // One bar per recent turn: its height is what the turn cost, its colour the kind of token
-    // of new work that cost most (in blue, out magenta, cache writes yellow; grey if none). A bar
+    // of new work that cost most (in green, cache writes yellow, out blue; grey if none). A bar
     // lights on hover and unfolds its turn's figures beneath the band.
     const recent = (o: Layout) => (o.spark === 0 ? [] : history.slice(-o.spark))
-    const sparkWidth = (o: Layout) => (recent(o).length === 0 ? 0 : recent(o).length + 1)
+    const sparkWidth = (o: Layout) => (recent(o).length === 0 ? 0 : Math.ceil(recent(o).length * bar) + 1)
+    // One bar, and one wide glyph, in the characters the width estimate counts.
+    const bar = BAR_CHARS[e.surface] ?? 1
+    const wide = (WIDE_GLYPH_CELLS[e.surface] ?? 1) / (GLYPH_WIDTH[e.surface] ?? 1)
     const sparkOf = (list: TurnPoint[]) => {
       // Dollars when every bar has them, else the same turns priced by weight, so the bars
       // never mix two scales.
@@ -492,25 +512,28 @@ export const register: Register = on => {
     ))
 
     // Usage on the left; this session's own figures and the id chip at the right edge.
-    const line = (left: Part[], right: Part[], withSkills: boolean, spark: TurnPoint[] = []) => (
+    const line = (left: Part[], right: Part[], withSkills: boolean, spark: TurnPoint[] = [], withChip = true) => (
       <Box flexDirection="row" justifyContent="space-between">
         <Box flexShrink={1}>{row(left, Text, 'usage')}</Box>
         <Box flexShrink={0} marginLeft={2} flexDirection="row">
           {spark.length > 0 && sparkOf(spark)}
           {right.length > 0 && row(right, Text, 'session')}
           {withSkills && skillTag}
-          <Box marginLeft={right.length > 0 || (withSkills && skillTag !== null) || spark.length > 0 ? 2 : 0}>{chip}</Box>
+          {withChip && <Box marginLeft={right.length > 0 || (withSkills && skillTag !== null) || spark.length > 0 ? 2 : 0}>{chip}</Box>}
         </Box>
       </Box>
     )
 
-    const mine = turnParts(turn, everyTurn[everyTurn.length - 1]?.usd ?? null)
+    const lastUsd = everyTurn[everyTurn.length - 1]?.usd ?? null
+    const mine = turnParts(turn, lastUsd)
     const tag = skillLabel(skills)
     // The band's cells, in characters: more of them where a character is narrower than a cell.
     const glyph = GLYPH_WIDTH[e.surface] ?? 1
     const cells = Math.floor(e.props.bodyColumns / glyph)
-    const columns = cells - ICON.length - EDGE_MARGIN
-    const mineWidth = width(mine) + (tag ? tag.length + 2 : 0)
+    const iconCells = Math.ceil(ICON.length * wide)
+    const columnsFor = (o: Layout) => cells - (o.chip === false ? 0 : iconCells) - EDGE_MARGIN
+    const mineOf = (o: Layout) => (o.brief ? turnParts(turn, lastUsd, true) : mine)
+    const mineWidth = (o: Layout) => width(mineOf(o)) + (tag ? tag.length + 2 : 0)
     // The width estimate runs a few cells optimistic (the band's padding, proportional text), and a
     // row that overflows by a little wraps its last words onto a second line. "full in" is the part
     // that sits at the end, so a row showing it asks for a margin: it fits whole or it is dropped.
@@ -518,15 +541,15 @@ export const register: Register = on => {
       const parts = usageParts(o)
       const margin = parts.some(([text]) => text.includes('full in')) ? FULL_IN_MARGIN : 0
 
-      return width(parts) + margin + (o.session && mineWidth ? mineWidth + 2 : 0) + sparkWidth(o)
+      return width(parts) + margin + (o.session && mineWidth(o) ? mineWidth(o) + 2 : 0) + sparkWidth(o)
     }
-    const fit = LAYOUTS.find(o => need(o) <= columns)
+    const fit = LAYOUTS.find(o => need(o) <= columnsFor(o))
 
     if (fit !== undefined) {
       return (
         <Box flexDirection="column">
           {turnDetails(recent(fit))}
-          {line(usageParts(fit), fit.session ? mine : [], fit.session, recent(fit))}
+          {line(usageParts(fit), fit.session ? mineOf(fit) : [], fit.session, recent(fit), fit.chip !== false)}
           {fit.session && details}
         </Box>
       )
@@ -540,9 +563,9 @@ export const register: Register = on => {
     const rowsAt = (o: Layout) =>
       [conversation(current), join(windows.map(w => plan(w, o)), ' · ')].filter(r => r.length > 0)
     const rows = rowsAt(last)
-    const beside = (small.length > 0 ? small.length + 1 : 0) + 4 // sparkline, and the gaps before the chip
+    const beside = (small.length > 0 ? Math.ceil(small.length * bar) + 1 : 0) + 4 // sparkline, and the gaps before the chip
     const roomFor = (r: Part[]) =>
-      width(r) + (r.some(([text]) => text.includes('full in')) ? FULL_IN_MARGIN : 0) + beside + ICON.length <= cells - EDGE_MARGIN
+      width(r) + (r.some(([text]) => text.includes('full in')) ? FULL_IN_MARGIN : 0) + beside + Math.ceil(ICON.length * wide) <= cells - EDGE_MARGIN
 
     if (!roomFor(rows[rows.length - 1])) {
       rows[rows.length - 1] = rowsAt({ ...last, fullIn: false })[rows.length - 1]
