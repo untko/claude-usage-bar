@@ -4,35 +4,87 @@
 
 [Watch with narration](assets/videos/usage-bar-pitch-landscape.mp4) · [vertical cut](assets/videos/usage-bar-pitch-vertical.mp4)
 
-A Claude Code mod: an always-visible band above the prompt showing context fill, plan rate
-limits (5h, 7d), the last turn's tokens, duration and cost, its skills, a per-turn sparkline (height is cost, colour the costliest new work: in green, cache writes yellow, out blue, grey if none;
-hover a bar for that turn's figures, end time and cost), and a copy mark that copies the session id.
+A Claude Code mod: one always-visible line above your prompt that answers three questions:
+how full is my context, how much of my plan is left, and what did the last turn cost.
 
-## Layout
+It works in the Claude desktop app and in the terminal. It is not in the Claude plugin
+marketplace; you install it from a local marketplace folder (see [Install](#install)).
 
-- `hooks/register.tsx` — the mod (band, layouts, turn accounting)
-- `hooks/register.test.ts` — tests, run with `claude plugin test usage-bar`
-- `types/index.d.ts` — plugin state types
-- `.claude-plugin/plugin.json` — manifest (bump `version` on every change)
+## What it shows
 
-## Install from a local marketplace
-
-Put this folder beside a `.claude-plugin/marketplace.json` that lists it with `"source": "./usage-bar"`, then:
-
-```bash
-claude plugin marketplace add <marketplace-folder>
-claude plugin install usage-bar@<marketplace-name>
+```
+ctx 104k · 5h 29%▲ ↻3h58m · 7d 19% ↻3d16h        ▁▂▂█▄  ↳ 503 8s $0.03  ⧉
 ```
 
-Updates: bump the version in `plugin.json` and the marketplace entry, run `claude plugin validate`,
-`claude plugin test`, `claude plugin marketplace update`, `claude plugin update`, then fully quit the app.
+- **Context** (`ctx`): tokens in the window. The colour warms toward compaction.
+- **Plan limits** (`5h`, `7d`): percent of each rate-limit window used, with the time until it resets
+  (`↻`). `▲` means you are using the plan faster than time passes. When you are on pace to hit 100%
+  before the window resets, the figure turns red and adds `full in 1h20m`.
+- **Last turn** (`↳`): new tokens, duration and cost.
+- **Sparkline**: one bar per turn. Height is cost. Colour is the work that cost most: input green,
+  cache writes yellow, output blue, grey if none.
+- **Hover a bar** for that turn's split: cost by kind, cache reads, cache hit rate, end time, and the
+  session total.
+- **Copy mark** (`⧉`): one click copies the session id.
+
+### Narrow windows
+
+Parts are dropped whole, never cut or wrapped mid-word. When the window is too narrow, they drop in this order: the `full in` figure, the
+last turn, the sparkline's extra bars, the copy mark, the plan reset timers, the sparkline, and only then
+the band takes a second row. Context and the plans stay on one row as long as they fit.
+
+## Install
+
+The plugin is not published in a marketplace, so make a small local one around a clone of this repo
+(requires the `claude` CLI):
+
+```bash
+mkdir -p ~/claude-mods/.claude-plugin && cd ~/claude-mods
+git clone https://github.com/untko/claude-usage-bar usage-bar
+cat > .claude-plugin/marketplace.json <<'EOF'
+{
+  "name": "local-mods",
+  "owner": { "name": "you" },
+  "plugins": [
+    { "name": "usage-bar", "source": "./usage-bar", "description": "Context, plan limits and per-turn cost above the prompt" }
+  ]
+}
+EOF
+claude plugin marketplace add ~/claude-mods
+claude plugin install usage-bar@local-mods
+```
+
+Then fully quit and reopen the app. `/reload-plugins` is not enough to load a mod.
+
+### Update
+
+```bash
+git -C ~/claude-mods/usage-bar pull
+claude plugin marketplace update local-mods
+claude plugin update usage-bar@local-mods
+```
+
+Then fully quit and reopen the app. Updates apply when `version` in `.claude-plugin/plugin.json`
+changes, which every release bumps.
 
 ## Developing
 
-- Run the tests from the marketplace folder (`plugins/`), not from inside this folder: `claude plugin test usage-bar`.
-- This folder is its own git repo (`untko/claude-usage-bar`, branch `main`); the marketplace folder above it is not. Do not commit `.superpowers/friction.jsonl`, an auto-written log.
-- Keep the version below 1.0.0 (0.9.9, then 0.9.10, and so on). Bump it in `plugin.json` and in the marketplace entry together.
-- A new version loads only after the app is fully quit and reopened; `/reload-plugins` keeps the old one.
+Layout:
+
+- `hooks/register.tsx`: the mod (band, layouts, turn accounting)
+- `hooks/register.test.ts`: tests
+- `types/index.d.ts`: plugin state types
+- `.claude-plugin/plugin.json`: manifest
+- `assets/videos/`: the pitch video, in landscape and vertical cuts, and the GIF above
+
+Workflow:
+
+- Run the tests from the marketplace folder that contains the plugin, not from inside the plugin folder:
+  `claude plugin test usage-bar`.
+- Releasing: bump `version` in `plugin.json` (and in the marketplace entry if it has one), then run
+  `claude plugin validate usage-bar`, `claude plugin test usage-bar`,
+  `claude plugin marketplace update <marketplace>` and `claude plugin update usage-bar@<marketplace>`, and fully quit the app.
+- Keep the version below 1.0.0 (0.9.9, then 0.9.10, and so on).
 - On macOS, `sed -i` needs an empty suffix argument: `sed -i ''`.
 
 ### Width rules
