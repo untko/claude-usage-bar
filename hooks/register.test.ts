@@ -126,7 +126,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     on('turn.complete', async () => ({ text: '' }))
     await $.session.start({ cwd: '/tmp', surface, isInteractive: true })
 
-    const done = async (id: string, output: number, cost: number, agentId?: string) => {
+    const done = async (id: string, output: number, cost: number, agentId?: string, written = 0) => {
       spent += cost
       await $.turn.complete({
         answer: '',
@@ -135,13 +135,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
         turnId: id,
         reason: 'answer',
         agentId,
-        usage: { input_tokens: 100, output_tokens: output, cache_creation_input_tokens: 0, cache_read_input_tokens: 50000, model: 'claude-opus-5-5' },
+        usage: { input_tokens: 100, output_tokens: output, cache_creation_input_tokens: written, cache_read_input_tokens: 50000, model: 'claude-opus-5-5' },
       } as any)
     }
     await done('t1', 1000, 0.1)
     await done('t2', 30000, 0.5)
     await done('sub', 999, 9, 'agent-1') // a subagent's turn is not a bar
-    await done('t3', 100, 0.02)
+    await done('t3', 100, 0.02, undefined, 5000)
 
     const ui = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     const drawn = await ui.drawn()
@@ -149,11 +149,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     // Height is each turn's cost ($0.10, $0.50, and the subagent's $9 landing on the third).
     expect(spark?.text).toBe('▁▁█')
-    // Colour is the kind that cost the turn most: output (magenta) for the 1k and 30k turns,
-    // cache reads (green) for the last.
-    expect(drawnKey(drawn, 'spark')?.children.map((c: any) => c.props?.color)).toEqual(['magenta', 'magenta', 'green'])
+    // Colour is the new work that cost the turn most: output (magenta) for the 1k and 30k turns,
+    // cache writes (yellow) for the last. Cache reads never decide: they top every long turn.
+    expect(drawnKey(drawn, 'spark')?.children.map((c: any) => c.props?.color)).toEqual(['magenta', 'magenta', 'yellow'])
     // The last turn leads with its tokens and time, then what it cost.
-    expect(flat(drawn)).toContain('↳ 200 2s $9.02')
+    expect(flat(drawn)).toContain('↳ 5k 2s $9.02')
 
     expect(drawnKey(drawn, 'spark')?.children[1].hover).toEqual({ scope: 'usage-bar-turn-2', color: 'cyan' })
     expect(drawnKey(drawn, 'turn-detail-2')?.hover).toEqual({ scope: 'usage-bar-turn-2', display: 'flex' })
@@ -168,7 +168,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ key: 'turn-detail-3' }))?.text).toContain('$9.02')
     expect(second).toContain('$0.50')
     expect(second).toContain('opus-5-5')
-    expect(second).toContain('Σ 3 turns 31k new')
+    // Cache hit: reads over all the input read, here 50k of 50.1k.
+    expect(second).toContain('hit 100%')
+    expect(second).toMatch(/Σ 3 turns[^#]*hit 9\d%/)
+    // The strip splits the turn's cost by kind and is always 30 cells: turn 2's 30k output at x5
+    // is nearly all of it, with a cell each left for the tiny input and the cache read.
+    expect((second?.match(/█/g) ?? []).length).toBe(30)
+    expect(second).toContain('cost by kind')
+    expect(second).toContain('Σ 3 turns 36k new')
   })
 
   test(`${surface}: a narrow band drops the last-turn text before the sparkline`, async ($, on) => {

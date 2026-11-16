@@ -152,15 +152,48 @@ const KINDS = [
   { name: 'in', weight: 1, color: 'blue', of: (t: TurnPoint) => t.input },
   { name: 'out', weight: 5, color: 'magenta', of: (t: TurnPoint) => t.output },
   { name: 'cache+', weight: 1.25, color: 'yellow', of: (t: TurnPoint) => t.cacheWrite },
-  { name: 'cache read', weight: 0.1, color: 'green', of: (t: TurnPoint) => t.cacheRead },
+  { name: 'cache read', weight: 0.1, color: 'gray', of: (t: TurnPoint) => t.cacheRead },
 ] as const
 
 const weighted = (t: TurnPoint) => KINDS.reduce((n, k) => n + k.weight * k.of(t), 0)
 
-// A cell holds one colour, so a bar shows the kind that cost the turn most; the hover row
-// carries the whole split.
-const dominant = (t: TurnPoint) =>
-  KINDS.reduce((best, k) => (k.weight * k.of(t) > best.weight * best.of(t) ? k : best), KINDS[0])
+// A cell holds one colour, so a bar shows the new work that cost the turn most: input, output
+// or cache writes. Cache reads are left out of the choice: on a long session they are the
+// biggest line of nearly every turn, and every bar would turn the same grey. A turn with no
+// new work at all shows grey. The hover row carries the whole split.
+const dominant = (t: TurnPoint) => {
+  const fresh = KINDS.slice(0, 3).reduce((best, k) => (k.weight * k.of(t) > best.weight * best.of(t) ? k : best), KINDS[0])
+
+  return fresh.of(t) > 0 ? fresh : KINDS[3]
+}
+
+// How wide the hover's stacked strip is, in cells.
+const STACK_CELLS = 30
+
+// One turn's whole cost as a strip: a run of blocks per token kind, as long as that kind's share
+// of the turn's weighted cost, each in the kind's colour. A kind that cost anything keeps a cell.
+const stackRow = (t: TurnPoint): Part[] => {
+  const total = weighted(t)
+  const shares = KINDS.map(k => (total === 0 ? 0 : (k.weight * k.of(t)) / total))
+  const cells = shares.map(share => (share === 0 ? 0 : Math.max(1, Math.round(share * STACK_CELLS))))
+  const biggest = shares.indexOf(Math.max(...shares))
+  if (total > 0) cells[biggest] = Math.max(1, cells[biggest] + STACK_CELLS - cells.reduce((n, c) => n + c, 0))
+
+  return [
+    ['  ', {}],
+    ...KINDS.flatMap((k, i): Part[] => (cells[i] === 0 ? [] : [['█'.repeat(cells[i]), { color: k.color }]])),
+    ['  cost by kind', { dimColor: true }],
+  ]
+}
+
+// The share of a prompt's input tokens that came from the cache: reads over everything the model
+// read (fresh input, cache writes and cache reads). Null when nothing was read.
+const hitRate = (list: TurnPoint[]) => {
+  const read = list.reduce((n, t) => n + t.cacheRead, 0)
+  const all = read + list.reduce((n, t) => n + t.input + t.cacheWrite, 0)
+
+  return all === 0 ? null : `${Math.round((read / all) * 100)}%`
+}
 
 const dollars = (usd: number) => (usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`)
 
@@ -185,6 +218,7 @@ const turnRow = (t: TurnPoint, now: number): Part[] => [
     [`${i === 0 ? '  ' : ' · '}${k.name} `, { dimColor: true }],
     [tokens(k.of(t)), { color: k.color }],
   ]),
+  ...(hitRate([t]) === null ? [] : [[`  hit ${hitRate([t])}`, { dimColor: true }] as Part]),
   [`  ${seconds(t.ms)}`, { dimColor: true }],
   ...(t.usd === null ? [] : [[`  ${dollars(t.usd)}`, {}] as Part]),
   [`  ${modelName(t.model)}`, { dimColor: true }],
@@ -198,6 +232,7 @@ const totalRow = (list: TurnPoint[]): Part[] => {
     [`Σ ${list.length} turn${list.length === 1 ? '' : 's'} `, { dimColor: true }],
     [`${tokens(list.reduce((n, t) => n + t.tokens, 0))} new`, {}],
     [`  cache read ${tokens(list.reduce((n, t) => n + t.cacheRead, 0))}`, { dimColor: true }],
+    ...(hitRate(list) === null ? [] : [[`  hit ${hitRate(list)}`, { dimColor: true }] as Part]),
     ...(list.some(t => t.usd !== null) ? [[`  ${dollars(usd)}`, {}] as Part] : []),
   ]
 }
@@ -415,7 +450,7 @@ export const register: Register = on => {
       ) : null
 
     // One bar per recent turn: its height is what the turn cost, its colour the kind of token
-    // that cost most (in blue, out magenta, cache writes yellow, cache reads green). A bar
+    // of new work that cost most (in blue, out magenta, cache writes yellow; grey if none). A bar
     // lights on hover and unfolds its turn's figures beneath the band.
     const recent = (o: Layout) => (o.spark === 0 ? [] : history.slice(-o.spark))
     const sparkWidth = (o: Layout) => (recent(o).length === 0 ? 0 : recent(o).length + 1)
@@ -451,6 +486,7 @@ export const register: Register = on => {
         hover={{ scope: `usage-bar-turn-${t.n}`, display: 'flex' }}
       >
         {row(turnRow(t, now), Text, `turn-${t.n}`)}
+        {row(stackRow(t), Text, `stack-${t.n}`)}
         {row(totalRow(everyTurn), Text, `total-${t.n}`)}
       </Box>
     ))
