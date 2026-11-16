@@ -1,1 +1,1 @@
-{ "name": "usage-bar", "version": "0.9.9", "description": "Always-visible band above the prompt: context fill, plan rate limits (5h, 7d) and a per-turn token sparkline", "types": "./types/index.d.ts" }
+{ "name": "usage-bar", "version": "0.9.10", "description": "Always-visible band above the prompt: context fill, plan rate limits (5h, 7d) and a per-turn cost sparkline", "types": "./types/index.d.ts" }

@@ -147,7 +147,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const drawn = await ui.drawn()
     const spark = await ui.find({ key: 'spark' })
 
-    expect(spark?.text).toBe('▁█▁')
+    // Height is each turn's cost ($0.10, $0.50, and the subagent's $9 landing on the third).
+    expect(spark?.text).toBe('▁▁█')
+    // Colour is the kind that cost the turn most: output (magenta) for the 1k and 30k turns,
+    // cache reads (green) for the last.
+    expect(drawnKey(drawn, 'spark')?.children.map((c: any) => c.props?.color)).toEqual(['magenta', 'magenta', 'green'])
     // The last turn leads with its tokens and time, then what it cost.
     expect(flat(drawn)).toContain('↳ 200 2s $9.02')
 

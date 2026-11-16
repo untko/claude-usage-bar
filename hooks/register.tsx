@@ -141,15 +141,26 @@ const turnParts = (turn: LastTurn | null, usd: number | null): Part[] =>
     ? []
     : [[`↳ ${tokens(turn.tokens)} ${seconds(turn.ms)}${usd === null ? '' : ` ${dollars(usd)}`}`, { dimColor: true }]]
 
-// One bar per turn, as tall as its new tokens against the busiest shown turn.
-const barOf = (tokens: number, peak: number) =>
-  BARS[Math.min(BARS.length - 1, Math.max(0, Math.ceil((tokens / Math.max(peak, 1)) * BARS.length) - 1))]
+// One bar per turn, as tall as what the turn cost against the dearest turn shown.
+const barOf = (value: number, peak: number) =>
+  BARS[Math.min(BARS.length - 1, Math.max(0, Math.ceil((value / Math.max(peak, 1e-9)) * BARS.length) - 1))]
 
-const median = (values: number[]) => {
-  const sorted = [...values].sort((a, b) => a - b)
+// What a token kind costs next to a fresh input token (the price ratios hold across Claude
+// models): an output token five times, a cache write 1.25, a cache read a tenth. The weights
+// rank a turn's kinds by what they cost, and stand in for dollars when the ledger is silent.
+const KINDS = [
+  { name: 'in', weight: 1, color: 'blue', of: (t: TurnPoint) => t.input },
+  { name: 'out', weight: 5, color: 'magenta', of: (t: TurnPoint) => t.output },
+  { name: 'cache+', weight: 1.25, color: 'yellow', of: (t: TurnPoint) => t.cacheWrite },
+  { name: 'cache read', weight: 0.1, color: 'green', of: (t: TurnPoint) => t.cacheRead },
+] as const
 
-  return sorted.length === 0 ? 0 : sorted[Math.floor(sorted.length / 2)]
-}
+const weighted = (t: TurnPoint) => KINDS.reduce((n, k) => n + k.weight * k.of(t), 0)
+
+// A cell holds one colour, so a bar shows the kind that cost the turn most; the hover row
+// carries the whole split.
+const dominant = (t: TurnPoint) =>
+  KINDS.reduce((best, k) => (k.weight * k.of(t) > best.weight * best.of(t) ? k : best), KINDS[0])
 
 const dollars = (usd: number) => (usd < 0.01 ? '<$0.01' : `$${usd.toFixed(2)}`)
 
@@ -170,8 +181,10 @@ const turnRow = (t: TurnPoint, now: number): Part[] => [
   [`#${t.n} `, { dimColor: true }],
   ...(t.at === undefined ? [] : [[`${stamp(t.at, now)}  `, { dimColor: true }] as Part]),
   [`${tokens(t.tokens)} new`, {}],
-  [`  in ${tokens(t.input)} · out ${tokens(t.output)} · cache+ ${tokens(t.cacheWrite)}`, { dimColor: true }],
-  [`  cache read ${tokens(t.cacheRead)}`, { dimColor: true }],
+  ...KINDS.flatMap((k, i): Part[] => [
+    [`${i === 0 ? '  ' : ' · '}${k.name} `, { dimColor: true }],
+    [tokens(k.of(t)), { color: k.color }],
+  ]),
   [`  ${seconds(t.ms)}`, { dimColor: true }],
   ...(t.usd === null ? [] : [[`  ${dollars(t.usd)}`, {}] as Part]),
   [`  ${modelName(t.model)}`, { dimColor: true }],
@@ -401,24 +414,28 @@ export const register: Register = on => {
         </Box>
       ) : null
 
-    // One bar per recent turn; a bar lights on hover and unfolds its turn's figures beneath
-    // the band. Quiet unless a turn ran at twice the usual (and at least 20k): that is yellow.
+    // One bar per recent turn: its height is what the turn cost, its colour the kind of token
+    // that cost most (in blue, out magenta, cache writes yellow, cache reads green). A bar
+    // lights on hover and unfolds its turn's figures beneath the band.
     const recent = (o: Layout) => (o.spark === 0 ? [] : history.slice(-o.spark))
     const sparkWidth = (o: Layout) => (recent(o).length === 0 ? 0 : recent(o).length + 1)
     const sparkOf = (list: TurnPoint[]) => {
-      const peak = Math.max(1, ...list.map(t => t.tokens))
-      const typical = median(list.map(t => t.tokens))
+      // Dollars when every bar has them, else the same turns priced by weight, so the bars
+      // never mix two scales.
+      const priced = list.every(t => t.usd !== null)
+      const cost = (t: TurnPoint) => (priced ? (t.usd as number) : weighted(t))
+      const peak = Math.max(1e-9, ...list.map(cost))
 
       return (
         <Box key="spark" flexDirection="row" marginRight={1}>
           {list.map((t, i) => (
             <Text
               key={`bar-${t.n}`}
-              dimColor={i !== list.length - 1 && !(t.tokens >= 20000 && t.tokens >= 2 * typical)}
-              color={t.tokens >= 20000 && t.tokens >= 2 * typical ? 'yellow' : undefined}
+              dimColor={i !== list.length - 1}
+              color={dominant(t).color}
               hover={{ scope: `usage-bar-turn-${t.n}`, color: 'cyan' }}
             >
-              {barOf(t.tokens, peak)}
+              {barOf(cost(t), peak)}
             </Text>
           ))}
         </Box>
