@@ -229,13 +229,16 @@ const stamp = (at: number, now: number) => {
     : `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${clock}`
 }
 
+// Short names keep the detail rows to one line: C for cache writes, CR for cache reads.
+const SHORT: Record<string, string> = { in: 'in', 'cache+': 'C', out: 'out', 'cache read': 'CR' }
+
 // A turn's detail row: when it ended, what it spent by kind, how long, what it cost.
 const turnRow = (t: TurnPoint, now: number): Part[] => [
   [`#${t.n} `, { dimColor: true }],
   ...(t.at === undefined ? [] : [[`${stamp(t.at, now)}  `, { dimColor: true }] as Part]),
   [`${tokens(t.tokens)} new`, {}],
   ...KINDS.flatMap((k, i): Part[] => [
-    [`${i === 0 ? '  ' : ' · '}${k.name} `, { dimColor: true }],
+    [`${i === 0 ? '  ' : ' · '}${SHORT[k.name]} `, { dimColor: true }],
     [tokens(k.of(t)), { color: k.color }],
   ]),
   ...(hitRate([t]) === null ? [] : [[`  hit ${hitRate([t])}`, { dimColor: true }] as Part]),
@@ -243,9 +246,6 @@ const turnRow = (t: TurnPoint, now: number): Part[] => [
   ...(t.usd === null ? [] : [[`  ${dollars(t.usd)}`, {}] as Part]),
   [`  ${modelName(t.model)}`, { dimColor: true }],
 ]
-
-// Short names keep the session row to one line: C for cache writes, CR for cache reads.
-const SHORT: Record<string, string> = { in: 'in', 'cache+': 'C', out: 'out', 'cache read': 'CR' }
 
 // What each kind cost over the session: every turn's dollars split by the price weights, summed.
 // The ledger holds one figure per turn, so this is an allocation; the kinds add up to the session

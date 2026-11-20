@@ -162,8 +162,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const second = (await ui.find({ key: 'turn-detail-2' }))?.text
     // The turn's end time leads the row: the clock alone, as the mocked "now" is the same day.
     expect(second).toMatch(/#2 \d\d:\d\d {2}30k new/)
-    expect(second).toContain('in 100 · cache+ 0 · out 30k')
-    expect(second).toContain('cache read 50k')
+    expect(second).toContain('in 100 · C 0 · out 30k')
+    expect(second).toContain('CR 50k')
     // The subagent's $9 lands in the next main turn's dollars, the turn that caused it.
     expect((await ui.find({ key: 'turn-detail-3' }))?.text).toContain('$9.02')
     expect(second).toContain('$0.50')

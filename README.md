@@ -23,7 +23,7 @@ ctx 104k · 5h 29%▲ ↻3h58m · 7d 19% ↻3d16h        ▁▂▂█▄  ↳ 50
 - **Last turn** (`↳`): new tokens, duration and cost.
 - **Sparkline**: one bar per turn. Height is cost. Colour is the work that cost most: input green,
   cache writes yellow, output blue, grey if none.
-- **Hover a bar** for that turn's split (cost by kind, cache reads, cache hit rate, end time), then one
+- **Hover a bar** for that turn's split (tokens by kind, cache hit rate, end time), then one
   session row, `Σ 45 turns  in 12k $0.18 · C 310k $1.20 · out 54k $2.70 · CR 26.9M $3.70  hit 98%  38m  $9.15`,
   and under it a stacked strip of the whole session's cost by kind, like the turn's.
   `C` is cache writes and `CR` cache reads. The per-kind dollars are approximate: the ledger holds one
