@@ -1,6 +1,6 @@
 # usage-bar
 
-![usage-bar in 50 seconds](assets/videos/usage-bar-pitch.gif)
+![usage-bar in under a minute](assets/videos/usage-bar-pitch.gif)
 
 [Watch with narration](assets/videos/usage-bar-pitch-landscape.mp4) · [vertical cut](assets/videos/usage-bar-pitch-vertical.mp4)
 
