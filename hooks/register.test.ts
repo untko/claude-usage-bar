@@ -175,7 +175,29 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // is nearly all of it, with a cell each left for the tiny input and the cache read.
     expect((second?.match(/█/g) ?? []).length).toBe(30)
     expect(second).toContain('cost by kind')
-    expect(second).toContain('Σ 3 turns 36k new')
+    // The session row is one line: each kind's tokens and dollars (C is cache writes, CR cache reads),
+    // the hit rate, the time and the total. The dollars split every turn's cost by the price weights,
+    // so the kinds add up to the total (the subagent's $9 lands on turn 3's cache writes).
+    const session = second?.slice(second.indexOf('cost by kind') + 'cost by kind'.length) ?? ''
+    expect(session).toContain('Σ 3 turns  in 300 $0.08 · C 5k $4.76 · out 31k $0.91 · CR 150k $3.87  hit 97%  6s  $9.62')
+    const dollarsOf = [...session.matchAll(/\$(\d+\.\d\d)/g)].map(m => Number(m[1]))
+    expect(Math.abs(dollarsOf.slice(0, 4).reduce((a, b) => a + b, 0) - (dollarsOf[4] ?? 0))).toBeLessThan(0.02)
+
+    // Narrowing the band gives up time, then the hit rate, then each kind's dollars, then "turns",
+    // and the row never gets longer, so it stays one line.
+    const rows: string[] = []
+    for (let columns = 200; columns >= 40; columns -= 4) {
+      const m = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: columns } })
+      const text = (await m.find({ key: 'turn-detail-2' }))?.text ?? ''
+      rows.push(text.slice(text.indexOf('cost by kind') + 'cost by kind'.length))
+    }
+    expect(rows[0]).toBe(session)
+    expect(rows.every(r => !r.includes('\n'))).toBe(true)
+    expect(rows.map(r => r.length)).toEqual([...rows.map(r => r.length)].sort((a, b) => b - a))
+    expect(rows.some(r => r.includes('hit') && !r.includes('6s'))).toBe(true)
+    expect(rows.some(r => !r.includes('hit') && r.includes('$0.08'))).toBe(true)
+    expect(rows.some(r => !r.includes('$0.08') && r.includes('turns'))).toBe(true)
+    expect(rows.some(r => /Σ 3 {2}in/.test(r))).toBe(true)
   })
 
   test(`${surface}: a narrow band drops the last-turn text before the sparkline`, async ($, on) => {
@@ -426,7 +448,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const wide = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: PROPS })
     expect((await wide.find({ key: 'spark' }))?.text).toHaveLength(5)
     // No bar is for an old turn only: the hover on the newest shows the whole session's total.
-    expect((await wide.find({ key: 'turn-detail-60' }))?.text).toContain('Σ 60 turns 60k new')
+    expect((await wide.find({ key: 'turn-detail-60' }))?.text).toContain('Σ 60 turns  in 60 · C 0 · out 60k')
 
     const narrow = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: surface === 'desktop' ? 17 : 15 } })
     expect((await narrow.find({ key: 'spark' }))?.text).toHaveLength(3)

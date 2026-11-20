@@ -241,17 +241,53 @@ const turnRow = (t: TurnPoint, now: number): Part[] => [
   [`  ${modelName(t.model)}`, { dimColor: true }],
 ]
 
-// The whole recorded session in one row: turns, new tokens, cache reads, dollars.
-const totalRow = (list: TurnPoint[]): Part[] => {
-  const usd = list.reduce((n, t) => n + (t.usd ?? 0), 0)
+// Short names keep the session row to one line: C for cache writes, CR for cache reads.
+const SHORT: Record<string, string> = { in: 'in', 'cache+': 'C', out: 'out', 'cache read': 'CR' }
 
-  return [
-    [`Σ ${list.length} turn${list.length === 1 ? '' : 's'} `, { dimColor: true }],
-    [`${tokens(list.reduce((n, t) => n + t.tokens, 0))} new`, {}],
-    [`  cache read ${tokens(list.reduce((n, t) => n + t.cacheRead, 0))}`, { dimColor: true }],
-    ...(hitRate(list) === null ? [] : [[`  hit ${hitRate(list)}`, { dimColor: true }] as Part]),
+// What each kind cost over the session: every turn's dollars split by the price weights, summed.
+// The ledger holds one figure per turn, so this is an allocation; the kinds add up to the session
+// total. Null unless every turn has dollars.
+const kindDollars = (list: TurnPoint[]) =>
+  list.some(t => t.usd === null)
+    ? null
+    : KINDS.map(k =>
+        list.reduce((n, t) => {
+          const total = weighted(t)
+
+          return total === 0 ? n : n + ((t.usd as number) * k.weight * k.of(t)) / total
+        }, 0),
+      )
+
+const spent = (ms: number) => (ms < 60000 ? seconds(ms) : span(Math.round(ms / 60000)))
+
+// The whole recorded session in one row: turns, then each kind's tokens and dollars, the cache hit
+// rate, the time it ran and the total dollars. Richest first; the first that fits `room` is drawn,
+// so the row gives up time, then the hit rate, then the kinds' dollars, then the word "turns".
+const totalRow = (list: TurnPoint[], room = Infinity): Part[] => {
+  const usd = list.reduce((n, t) => n + (t.usd ?? 0), 0)
+  const split = kindDollars(list)
+  const hit = hitRate(list)
+  const ms = list.reduce((n, t) => n + t.ms, 0)
+  const build = (o: { each: boolean; hit: boolean; time: boolean; word: boolean }): Part[] => [
+    [o.word ? `Σ ${list.length} turn${list.length === 1 ? '' : 's'}  ` : `Σ ${list.length}  `, { dimColor: true }],
+    ...KINDS.flatMap((k, i): Part[] => [
+      [`${i === 0 ? '' : ' · '}${SHORT[k.name]} `, { dimColor: true }],
+      [tokens(list.reduce((n, t) => n + k.of(t), 0)), { color: k.color }],
+      ...(o.each && split !== null ? [[` ${dollars(split[i])}`, { color: k.color }] as Part] : []),
+    ]),
+    ...(o.hit && hit !== null ? [[`  hit ${hit}`, { dimColor: true }] as Part] : []),
+    ...(o.time ? [[`  ${spent(ms)}`, { dimColor: true }] as Part] : []),
     ...(list.some(t => t.usd !== null) ? [[`  ${dollars(usd)}`, {}] as Part] : []),
   ]
+  const tiers = [
+    { each: true, hit: true, time: true, word: true },
+    { each: true, hit: true, time: false, word: true },
+    { each: true, hit: false, time: false, word: true },
+    { each: false, hit: false, time: false, word: true },
+    { each: false, hit: false, time: false, word: false },
+  ]
+
+  return build(tiers.find(o => width(build(o)) <= room) ?? tiers[tiers.length - 1])
 }
 
 // The first skill by name, the rest as a count; hovering lists them all.
@@ -498,7 +534,7 @@ export const register: Register = on => {
     }
     // Hovering a bar unfolds its turn and the session total above the band: the band
     // clips anything placed over it, so the card grows the band instead of floating.
-    const turnDetails = (list: TurnPoint[]) => list.map(t => (
+    const turnDetails = (list: TurnPoint[], room: number) => list.map(t => (
       <Box
         key={`turn-detail-${t.n}`}
         flexDirection="column"
@@ -507,7 +543,7 @@ export const register: Register = on => {
       >
         {row(turnRow(t, now), Text, `turn-${t.n}`)}
         {row(stackRow(t), Text, `stack-${t.n}`)}
-        {row(totalRow(everyTurn), Text, `total-${t.n}`)}
+        {row(totalRow(everyTurn, room), Text, `total-${t.n}`)}
       </Box>
     ))
 
@@ -548,7 +584,7 @@ export const register: Register = on => {
     if (fit !== undefined) {
       return (
         <Box flexDirection="column">
-          {turnDetails(recent(fit))}
+          {turnDetails(recent(fit), cells - EDGE_MARGIN)}
           {line(usageParts(fit), fit.session ? mineOf(fit) : [], fit.session, recent(fit), fit.chip !== false)}
           {fit.session && details}
         </Box>
@@ -573,7 +609,7 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column">
-        {turnDetails(small)}
+        {turnDetails(small, cells - EDGE_MARGIN)}
         {rows.slice(0, -1).map((r, i) => row(r, Text, `r${i}`))}
         {/* No wrapper box: it would shrink to its content and leave nothing to push the sparkline and id to the edge. */}
         {line(rows[rows.length - 1], [], false, small)}

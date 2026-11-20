@@ -1,6 +1,6 @@
 {
   "name": "usage-bar",
-  "version": "0.9.20",
+  "version": "0.9.21",
   "description": "Always-visible band above the prompt: context fill, plan rate limits (5h, 7d) and a per-turn cost sparkline",
   "types": "./types/index.d.ts",
   "license": "Apache-2.0"
