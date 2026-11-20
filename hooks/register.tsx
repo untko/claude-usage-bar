@@ -187,11 +187,11 @@ const dominant = (t: TurnPoint) => {
 // How wide the hover's stacked strip is, in cells.
 const STACK_CELLS = 30
 
-// One turn's whole cost as a strip: a run of blocks per token kind, as long as that kind's share
-// of the turn's weighted cost, each in the kind's colour. A kind that cost anything keeps a cell.
-const stackRow = (t: TurnPoint): Part[] => {
-  const total = weighted(t)
-  const shares = KINDS.map(k => (total === 0 ? 0 : (k.weight * k.of(t)) / total))
+// A strip of blocks: a run per token kind, as long as that kind's share of the cost, each in the
+// kind's colour. A kind that cost anything keeps a cell; the biggest run takes the rounding.
+const stackOf = (weights: number[]): Part[] => {
+  const total = weights.reduce((n, w) => n + w, 0)
+  const shares = weights.map(w => (total === 0 ? 0 : w / total))
   const cells = shares.map(share => (share === 0 ? 0 : Math.max(1, Math.round(share * STACK_CELLS))))
   const biggest = shares.indexOf(Math.max(...shares))
   if (total > 0) cells[biggest] = Math.max(1, cells[biggest] + STACK_CELLS - cells.reduce((n, c) => n + c, 0))
@@ -202,6 +202,9 @@ const stackRow = (t: TurnPoint): Part[] => {
     ['  cost by kind', { dimColor: true }],
   ]
 }
+
+// One turn's cost as a strip, by the price weights.
+const stackRow = (t: TurnPoint): Part[] => stackOf(KINDS.map(k => k.weight * k.of(t)))
 
 // The share of a prompt's input tokens that came from the cache: reads over everything the model
 // read (fresh input, cache writes and cache reads). Null when nothing was read.
@@ -289,6 +292,11 @@ const totalRow = (list: TurnPoint[], room = Infinity): Part[] => {
 
   return build(tiers.find(o => width(build(o)) <= room) ?? tiers[tiers.length - 1])
 }
+
+// The whole session as a strip: the per-kind dollars when every turn has them (the same figures the
+// session row prints), else the price weights over the session's tokens.
+const sessionStack = (list: TurnPoint[]): Part[] =>
+  stackOf(kindDollars(list) ?? KINDS.map(k => k.weight * list.reduce((n, t) => n + k.of(t), 0)))
 
 // The first skill by name, the rest as a count; hovering lists them all.
 const skillLabel = (skills: SkillUse[]) =>
@@ -544,6 +552,7 @@ export const register: Register = on => {
         {row(turnRow(t, now), Text, `turn-${t.n}`)}
         {row(stackRow(t), Text, `stack-${t.n}`)}
         {row(totalRow(everyTurn, room), Text, `total-${t.n}`)}
+        {row(sessionStack(everyTurn), Text, `session-stack-${t.n}`)}
       </Box>
     ))
 

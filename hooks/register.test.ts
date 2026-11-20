@@ -173,12 +173,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(second).toMatch(/Σ 3 turns[^#]*hit 9\d%/)
     // The strip splits the turn's cost by kind and is always 30 cells: turn 2's 30k output at x5
     // is nearly all of it, with a cell each left for the tiny input and the cache read.
-    expect((second?.match(/█/g) ?? []).length).toBe(30)
+    // The detail holds two strips (the turn's, then the session's), 30 cells each.
+    expect((second?.match(/█/g) ?? []).length).toBe(60)
     expect(second).toContain('cost by kind')
     // The session row is one line: each kind's tokens and dollars (C is cache writes, CR cache reads),
     // the hit rate, the time and the total. The dollars split every turn's cost by the price weights,
     // so the kinds add up to the total (the subagent's $9 lands on turn 3's cache writes).
-    const session = second?.slice(second.indexOf('cost by kind') + 'cost by kind'.length) ?? ''
+    const after = second?.slice(second.indexOf('cost by kind') + 'cost by kind'.length) ?? ''
+    const session = after.split('\n').find(r => r.includes('Σ')) ?? ''
+    // Under it, the session's own strip: 30 cells again, split by the same per-kind dollars as the row
+    // ($0.08 input is under a cell's worth, so it keeps one; cache writes and reads take most).
+    const strip = after.split('\n').filter(r => r.includes('█')).pop() ?? ''
+    expect((strip.match(/█/g) ?? []).length).toBe(30)
+    expect(after.trimEnd().endsWith('cost by kind')).toBe(true)
     expect(session).toContain('Σ 3 turns  in 300 $0.08 · C 5k $4.76 · out 31k $0.91 · CR 150k $3.87  hit 97%  6s  $9.62')
     const dollarsOf = [...session.matchAll(/\$(\d+\.\d\d)/g)].map(m => Number(m[1]))
     expect(Math.abs(dollarsOf.slice(0, 4).reduce((a, b) => a + b, 0) - (dollarsOf[4] ?? 0))).toBeLessThan(0.02)
@@ -189,7 +196,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     for (let columns = 200; columns >= 40; columns -= 4) {
       const m = await $.ui.mount({ plugin: 'usage-bar', surface, component: 'AbovePrompt', props: { ...PROPS, bodyColumns: columns } })
       const text = (await m.find({ key: 'turn-detail-2' }))?.text ?? ''
-      rows.push(text.slice(text.indexOf('cost by kind') + 'cost by kind'.length))
+      rows.push((text.slice(text.indexOf('cost by kind') + 'cost by kind'.length).split('\n').find(r => r.includes('Σ')) ?? ''))
     }
     expect(rows[0]).toBe(session)
     expect(rows.every(r => !r.includes('\n'))).toBe(true)
